@@ -217,6 +217,14 @@ def init_sqlite_db() -> None:
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS waitlist (
+                user_id    INTEGER PRIMARY KEY,
+                username   TEXT,
+                full_name  TEXT,
+                joined_at  TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS processed_transactions (
                 tx_hash    TEXT PRIMARY KEY,
                 payment_id TEXT,
@@ -727,6 +735,7 @@ def subscription_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📅 Monthly Plan — $29/mo",  callback_data="sub_monthly")],
         [InlineKeyboardButton("♾️ Lifetime Plan — $199",   callback_data="sub_lifetime")],
+        [InlineKeyboardButton("📋 Join the Waitlist",      callback_data="join_waitlist")],
         [InlineKeyboardButton("💬 PGSM Chat",              url=CHAT_LINK_PUBLIC)],
         [InlineKeyboardButton("📢 PGSM Stock News",        url=NEWS_LINK_PUBLIC)],
         [InlineKeyboardButton("🎧 Support",                callback_data="support_unregistered")],
@@ -752,21 +761,26 @@ def main_menu_markup() -> InlineKeyboardMarkup:
 async def send_restricted_message(target, user=None) -> None:
     name = user.first_name if user and getattr(user, "first_name", None) else "there"
     text = (
-        f"⚡ Welcome to PGSM, {name}!\n\n"
-        "Prepaid & Gift Card Stocks Marketplace\n\n"
+        f"👋 Welcome to PGSM, {name}!\n\n"
+        "<b>PGSM Marketplace — Prepaid & Gift Card Stocks</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "📅 Monthly Plan — $29/month\n"
+        "🔒 <b>New memberships are temporarily suspended.</b>\n\n"
+        "We are currently limiting access to maintain the quality and "
+        "exclusivity of our marketplace. Enrollment will reopen soon.\n\n"
+        "📅 <b>Monthly Plan — $29/month</b>\n"
         "   Renews every 30 days\n\n"
-        "♾️ Lifetime Plan — $199 one-time\n"
-        "   Pay once, access forever\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "♾️ <b>Lifetime Plan — $199 one-time</b>\n"
+        "   Pay once, access forever\n\n"
         "✅ Instant delivery\n"
         "✅ Fresh stock, never relisted\n"
         "✅ Secure web dashboard\n"
-        "✅ LTC & USDC payments\n\n"
-        "Choose your plan to get started:"
+        "✅ LTC & USDC payments\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "📋 <b>Want to be notified when registrations open?</b>\n"
+        "Join our waitlist and you'll receive a direct notification "
+        "the moment new spots become available — before anyone else."
     )
-    await target.reply_text(text, reply_markup=subscription_markup())
+    await target.reply_html(text, reply_markup=subscription_markup())
 
 async def show_main_menu(target) -> None:
     await target.reply_text(
@@ -1566,6 +1580,50 @@ async def approvedlist_command(update: Update, context: ContextTypes.DEFAULT_TYP
         lines.append(f"• {uid} [{plan}] exp:{expires}")
     await update.message.reply_text("\n".join(lines) or "No users.")
 
+async def waitlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_admin(update.effective_chat.id):
+        return
+    try:
+        conn = get_sqlite_connection()
+        rows = conn.execute("SELECT user_id, username, full_name, joined_at FROM waitlist ORDER BY joined_at DESC").fetchall()
+        conn.close()
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+        return
+    if not rows:
+        await update.message.reply_text("Waitlist is empty.")
+        return
+    lines = [f"📋 Waitlist — {len(rows)} users\n"]
+    for r in rows[:50]:
+        tag = f"@{r['username']}" if r['username'] else r['full_name'] or "—"
+        lines.append(f"• {r['user_id']} {tag} ({r['joined_at'][:10]})")
+    await update.message.reply_text("\n".join(lines))
+
+async def notify_waitlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin: /notifywaitlist <message> — Bekleme listesindeki herkese mesaj gönder."""
+    if not is_admin(update.effective_chat.id):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /notifywaitlist <message>")
+        return
+    text = " ".join(context.args)
+    try:
+        conn = get_sqlite_connection()
+        rows = conn.execute("SELECT user_id FROM waitlist").fetchall()
+        conn.close()
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+        return
+    sent, failed = 0, 0
+    for r in rows:
+        try:
+            await context.bot.send_message(chat_id=r["user_id"], text=f"📢 PGSM Update\n\n{text}")
+            sent += 1
+        except Exception:
+            failed += 1
+        await asyncio.sleep(0.05)
+    await update.message.reply_text(f"Waitlist notified. Sent: {sent}, Failed: {failed}")
+
 async def messageuser_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_admin(update.effective_chat.id):
         return
@@ -1689,9 +1747,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         price = MONTHLY_PRICE_USD if plan == "monthly" else LIFETIME_PRICE_USD
         plan_name = MONTHLY_ACCESS_NAME if plan == "monthly" else LIFETIME_ACCESS_NAME
         price_str = f"${price:.0f}/month" if plan == "monthly" else f"${price:.0f} one-time"
-        await query.message.reply_text(
-            f"📋 {plan_name}\n\nPrice: {price_str}\n\nChoose your payment method:",
-            reply_markup=sub_payment_markup(plan),
+        await query.message.reply_html(
+            f"📋 <b>{plan_name}</b>\n\nPrice: <b>{price_str}</b>\n\n"
+            "🔒 <b>Enrollment is currently closed.</b>\n\n"
+            "New memberships are temporarily suspended. "
+            "Join the waitlist to be notified the moment spots open up.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Join the Waitlist", callback_data="join_waitlist")],
+                [InlineKeyboardButton("🔙 Back",              callback_data="restricted_home")],
+            ]),
         )
         return
 
@@ -1781,6 +1845,45 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await query.answer("No pending payment found.", show_alert=True)
             return
         await query.answer("Payment is being monitored automatically. You'll be notified once confirmed.", show_alert=True)
+        return
+
+    # ── Waitlist ──
+    if data == "join_waitlist":
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        username = query.from_user.username or ""
+        full_name = query.from_user.full_name or ""
+        try:
+            conn = get_sqlite_connection()
+            conn.execute(
+                "INSERT OR IGNORE INTO waitlist (user_id, username, full_name, joined_at) VALUES (?, ?, ?, ?)",
+                (user_id, username, full_name, now_str),
+            )
+            conn.commit()
+            already = conn.execute("SELECT joined_at FROM waitlist WHERE user_id = ?", (user_id,)).fetchone()
+            conn.close()
+            if already and already["joined_at"] != now_str:
+                await query.answer("You're already on the waitlist!", show_alert=True)
+            else:
+                await query.message.reply_html(
+                    "✅ <b>You're on the waitlist!</b>\n\n"
+                    "We'll notify you directly as soon as new memberships open up. "
+                    "Thank you for your interest in PGSM.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("💬 PGSM Chat",       url=CHAT_LINK_PUBLIC)],
+                        [InlineKeyboardButton("📢 PGSM Stock News", url=NEWS_LINK_PUBLIC)],
+                    ]),
+                )
+                try:
+                    tg_tag = f"@{username}" if username else full_name
+                    await query.get_bot().send_message(
+                        chat_id=ADMIN_CHAT_ID,
+                        text=f"📋 New Waitlist Entry\n\nUser: {tg_tag}\nID: {user_id}\nTime: {now_str}",
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"waitlist error: {e}")
+            await query.answer("Could not process your request. Please try again.", show_alert=True)
         return
 
     # Bilinmeyen callback
@@ -1891,6 +1994,8 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("broadcast", broadcast_command))
     app.add_handler(CommandHandler("approvedlist", approvedlist_command))
     app.add_handler(CommandHandler("messageuser", messageuser_command))
+    app.add_handler(CommandHandler("waitlist", waitlist_command))
+    app.add_handler(CommandHandler("notifywaitlist", notify_waitlist_command))
 
     # Callbacks & messages
     app.add_handler(CallbackQueryHandler(button_handler))
