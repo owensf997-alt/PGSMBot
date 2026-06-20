@@ -2002,7 +2002,6 @@ def build_application() -> Application:
         .token(TOKEN)
         .request(_request)
         .get_updates_request(_request)
-        .post_init(_capture_notify_loop)
         .build()
     )
     # Commands
@@ -2050,7 +2049,18 @@ def build_application() -> Application:
             BotCommand("start", "Open main menu"),
             BotCommand("help", "Help"),
         ])
-    app.post_init = set_commands
+
+    # KRİTİK: app.post_init = ... burada ATAMA yapmak, builder()'da zaten
+    # set edilmiş olan _capture_notify_loop'u EZER. Bu yüzden _notify_loop
+    # hiçbir zaman set edilmiyordu ve notify_stock her zaman asyncio.run()
+    # fallback'ine düşüp ana bot'un paylaşılan HTTP connection pool'unu
+    # farklı bir event loop'tan kullanarak bozuyordu (→ "Event loop is closed").
+    # Çözüm: iki post_init fonksiyonunu zincirleyip ikisini de çalıştır.
+    async def _post_init_chain(application):
+        await _capture_notify_loop(application)
+        await set_commands(application)
+    app.post_init = _post_init_chain
+
     app.add_error_handler(error_handler)
     return app
 
@@ -2108,8 +2118,14 @@ def _start_notify_server():
                 fut = _asyncio.run_coroutine_threadsafe(_send(), _notify_loop)
                 fut.result(timeout=15)
             else:
-                logger.warning("notify_stock: event loop henüz hazır değil, fallback deneniyor")
-                _asyncio.run(_send())
+                # GÜVENLİK: asyncio.run() ile yeni bir loop açıp _notify_bot_app.bot'u
+                # (ana polling loop ile AYNI HTTP connection pool'unu paylaşan nesne)
+                # buradan çağırmak, ana loop'un bağlantı havuzunu bozar ve botun
+                # "RuntimeError: Event loop is closed" ile çökmesine yol açar.
+                # Bu yüzden burada fallback DENEMİYORUZ — sadece kısa süreli
+                # 503 dönüp çağıranın (app.py) tekrar denemesini bekliyoruz.
+                logger.warning("notify_stock: event loop henüz hazır değil (bot başlıyor olabilir)")
+                return _jsonify({"error": "bot henüz hazır değil, kısa süre sonra tekrar deneyin"}), 503
             logger.info(f"notify_stock: mesaj gönderildi chat_id={chat_id}")
             return _jsonify({"success": True})
         except Exception as e:
@@ -2199,7 +2215,10 @@ def _start_notify_server():
                 fut = _asyncio.run_coroutine_threadsafe(_send_all(), _notify_loop)
                 sent, failed = fut.result(timeout=120)
             else:
-                sent, failed = _asyncio.run(_send_all())
+                # Aynı sebepten (bkz. notify_stock) paylaşılan connection pool'u
+                # farklı bir event loop'tan kullanmıyoruz.
+                logger.warning("waitlist_notify: event loop henüz hazır değil")
+                return _jsonify({"error": "bot henüz hazır değil, kısa süre sonra tekrar deneyin"}), 503
             logger.info(f"waitlist_notify: sent={sent} failed={failed}")
             return _jsonify({"success": True, "sent": sent, "failed": failed})
         except Exception as e:
