@@ -2120,6 +2120,112 @@ def _start_notify_server():
     def _health():
         return _jsonify({"status": "ok", "service": "pgsm-bot-notify"})
 
+    def _check_secret(data) -> bool:
+        _secret = NOTIFY_BOT_SECRET.strip()
+        if not _secret:
+            return True
+        return data.get("secret", "") == _secret
+
+    # ── Waitlist: listele ──
+    @_flask_app.route("/internal/waitlist/list", methods=["POST"])
+    def _waitlist_list():
+        data = _req.get_json(force=True, silent=True) or {}
+        if not _check_secret(data):
+            return _jsonify({"error": "unauthorized"}), 401
+        try:
+            conn = get_sqlite_connection()
+            rows = conn.execute(
+                "SELECT user_id, username, full_name, joined_at FROM waitlist ORDER BY joined_at DESC"
+            ).fetchall()
+            conn.close()
+            users = [
+                {"user_id": r["user_id"], "username": r["username"],
+                 "full_name": r["full_name"], "joined_at": r["joined_at"]}
+                for r in rows
+            ]
+            return _jsonify({"success": True, "users": users, "count": len(users)})
+        except Exception as e:
+            logger.warning(f"waitlist_list error: {e}")
+            return _jsonify({"error": str(e)}), 500
+
+    # ── Waitlist: mesaj gönder (tek veya toplu) ──
+    @_flask_app.route("/internal/waitlist/notify", methods=["POST"])
+    def _waitlist_notify():
+        data = _req.get_json(force=True, silent=True) or {}
+        if not _check_secret(data):
+            return _jsonify({"error": "unauthorized"}), 401
+
+        text = (data.get("text") or "").strip()
+        if not text:
+            return _jsonify({"error": "text zorunlu"}), 400
+
+        target_ids = data.get("user_ids")  # None ise tüm waitlist'e gider
+        try:
+            conn = get_sqlite_connection()
+            if target_ids:
+                placeholders = ",".join("?" for _ in target_ids)
+                rows = conn.execute(
+                    f"SELECT user_id FROM waitlist WHERE user_id IN ({placeholders})",
+                    tuple(target_ids)
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT user_id FROM waitlist").fetchall()
+            conn.close()
+        except Exception as e:
+            return _jsonify({"error": str(e)}), 500
+
+        if _notify_bot_app is None:
+            return _jsonify({"error": "bot henüz hazır değil"}), 503
+
+        import asyncio as _asyncio
+
+        async def _send_all():
+            sent, failed = 0, 0
+            for r in rows:
+                try:
+                    await _notify_bot_app.bot.send_message(
+                        chat_id=r["user_id"],
+                        text=f"📢 PGSM Update\n\n{text}"
+                    )
+                    sent += 1
+                except Exception as _e:
+                    logger.warning(f"waitlist_notify failed for {r['user_id']}: {_e}")
+                    failed += 1
+                await _asyncio.sleep(0.05)
+            return sent, failed
+
+        try:
+            if _notify_loop and _notify_loop.is_running():
+                fut = _asyncio.run_coroutine_threadsafe(_send_all(), _notify_loop)
+                sent, failed = fut.result(timeout=120)
+            else:
+                sent, failed = _asyncio.run(_send_all())
+            logger.info(f"waitlist_notify: sent={sent} failed={failed}")
+            return _jsonify({"success": True, "sent": sent, "failed": failed})
+        except Exception as e:
+            logger.warning(f"waitlist_notify error: {e}")
+            return _jsonify({"error": str(e)}), 500
+
+    # ── Waitlist: sil ──
+    @_flask_app.route("/internal/waitlist/remove", methods=["POST"])
+    def _waitlist_remove():
+        data = _req.get_json(force=True, silent=True) or {}
+        if not _check_secret(data):
+            return _jsonify({"error": "unauthorized"}), 401
+
+        user_id = data.get("user_id")
+        if not user_id:
+            return _jsonify({"error": "user_id zorunlu"}), 400
+        try:
+            conn = get_sqlite_connection()
+            conn.execute("DELETE FROM waitlist WHERE user_id = ?", (int(user_id),))
+            conn.commit()
+            conn.close()
+            return _jsonify({"success": True})
+        except Exception as e:
+            logger.warning(f"waitlist_remove error: {e}")
+            return _jsonify({"error": str(e)}), 500
+
     def _run():
         _flask_app.run(host="0.0.0.0", port=NOTIFY_HTTP_PORT, use_reloader=False)
 
