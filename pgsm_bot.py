@@ -49,8 +49,13 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+from telegram.request import HTTPXRequest
 
 load_dotenv()
+
+# Notify-server global state (webhook'tan stok bildirimi göndermek için kullanılır)
+_notify_bot_app  = None  # global bot referansı (main'de set edilir)
+_notify_loop     = None  # botun çalıştığı asyncio event loop (post_init'te set edilir)
 
 # ============================================================
 # LOGGING
@@ -1983,7 +1988,24 @@ def build_application() -> Application:
     if not init_wallet():
         logger.warning("Wallet not initialized — payments will fail")
 
-    app = Application.builder().token(TOKEN).build()
+    # Polling (get_updates) + ekstra istekler (send_message vb.) için yeterli pool.
+    # Varsayılan pool boyutu çok küçük olduğundan notify_stock gibi paralel
+    # isteklerde "Pool timeout" hatası alınıyordu.
+    _request = HTTPXRequest(
+        connection_pool_size=16,
+        pool_timeout=15.0,
+        connect_timeout=10.0,
+        read_timeout=20.0,
+        write_timeout=10.0,
+    )
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .request(_request)
+        .get_updates_request(_request)
+        .post_init(_capture_notify_loop)
+        .build()
+    )
     # Commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
@@ -2037,7 +2059,11 @@ def build_application() -> Application:
 # İç HTTP sunucu — Railway 1 (app.py) buraya webhook atar
 # POST /internal/notify_stock  →  bot kanalına mesaj gönderir
 # ─────────────────────────────────────────────────────────────────
-_notify_bot_app = None  # global bot referansı (main'de set edilir)
+async def _capture_notify_loop(application) -> None:
+    """Application başlatıldığında çalışan event loop'u güvenilir şekilde yakalar."""
+    global _notify_loop
+    _notify_loop = asyncio.get_running_loop()
+    logger.info("notify_stock: event loop yakalandı")
 
 def _start_notify_server():
     """Flask HTTP sunucusunu ayrı bir thread'de başlatır."""
@@ -2071,10 +2097,6 @@ def _start_notify_server():
 
         # Bot'un event loop'una mesajı gönder
         import asyncio as _asyncio
-        try:
-            loop = _notify_bot_app.bot._request[0]._client._transport._pool._loop  # noqa
-        except Exception:
-            loop = None
 
         async def _send():
             await _notify_bot_app.bot.send_message(
@@ -2083,10 +2105,11 @@ def _start_notify_server():
             )
 
         try:
-            if loop and loop.is_running():
-                fut = _asyncio.run_coroutine_threadsafe(_send(), loop)
-                fut.result(timeout=10)
+            if _notify_loop and _notify_loop.is_running():
+                fut = _asyncio.run_coroutine_threadsafe(_send(), _notify_loop)
+                fut.result(timeout=15)
             else:
+                logger.warning("notify_stock: event loop henüz hazır değil, fallback deneniyor")
                 _asyncio.run(_send())
             logger.info(f"notify_stock: mesaj gönderildi chat_id={chat_id}")
             return _jsonify({"success": True})
