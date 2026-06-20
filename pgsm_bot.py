@@ -741,7 +741,6 @@ def subscription_markup() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📅 Monthly Plan — $29/mo",  callback_data="sub_monthly")],
         [InlineKeyboardButton("♾️ Lifetime Plan — $199",   callback_data="sub_lifetime")],
         [InlineKeyboardButton("📋 Join the Waitlist",      callback_data="join_waitlist")],
-        [InlineKeyboardButton("💬 PGSM Chat",              url=CHAT_LINK_PUBLIC)],
         [InlineKeyboardButton("📢 PGSM Stock News",        url=NEWS_LINK_PUBLIC)],
         [InlineKeyboardButton("🎧 Support",                callback_data="support_unregistered")],
     ])
