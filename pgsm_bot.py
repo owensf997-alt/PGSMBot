@@ -2251,52 +2251,48 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # ── Waitlist ──
     if data == "join_waitlist":
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        username = query.from_user.username or ""
+        username  = query.from_user.username or ""
         full_name = query.from_user.full_name or ""
         try:
-            conn = get_sqlite_connection()
-            conn.execute(
-                "INSERT OR IGNORE INTO waitlist (user_id, username, full_name, joined_at) VALUES (?, ?, ?, ?)",
-                (user_id, username, full_name, now_str),
+            import requests as _req_wl
+            resp = _req_wl.post(
+                f"{WEB_BASE_URL}/api/waitlist/join",
+                json={
+                    "secret":    BOT_SECRET,
+                    "user_id":   user_id,
+                    "username":  username,
+                    "full_name": full_name,
+                },
+                timeout=10,
             )
-            conn.commit()
-            already = conn.execute(
-                "SELECT joined_at FROM waitlist WHERE user_id = ?", (user_id,)
-            ).fetchone()
-            conn.close()
-            if already and already["joined_at"] != now_str:
-                await query.answer("You're already on the waitlist!", show_alert=True)
-            else:
-                await query.message.reply_html(
-                    "✅ <b>You're on the waitlist!</b>\n\n"
-                    "We'll notify you directly as soon as new memberships open up. "
-                    "Thank you for your interest in PGSM.",
-                    reply_markup=InlineKeyboardMarkup(
-                        [
-                            [
-                                InlineKeyboardButton(
-                                    "💬 PGSM Chat", url=CHAT_LINK_PUBLIC
-                                )
-                            ],
-                            [
-                                InlineKeyboardButton(
-                                    "📢 PGSM Stock News", url=NEWS_LINK_PUBLIC
-                                )
-                            ],
-                        ]
-                    ),
-                )
-                try:
-                    tg_tag = f"@{username}" if username else full_name
-                    await query.get_bot().send_message(
-                        chat_id=ADMIN_CHAT_ID,
-                        text=f"📋 New Waitlist Entry\n\nUser: {tg_tag}\nID: {user_id}\nTime: {now_str}",
-                    )
-                except Exception:
-                    pass
+            result = resp.json().get("status", "error") if resp.ok else "error"
         except Exception as e:
-            logger.error(f"waitlist error: {e}")
+            logger.error(f"waitlist join API error: {e}")
+            result = "error"
+
+        if result == "already":
+            await query.answer("You're already on the waitlist!", show_alert=True)
+        elif result == "added":
+            tg_tag = f"@{username}" if username else full_name
+            await query.message.reply_html(
+                "✅ <b>You're on the waitlist!</b>\n\n"
+                "We'll notify you directly as soon as new memberships open up. "
+                "Thank you for your interest in PGSM.",
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [InlineKeyboardButton("💬 PGSM Chat", url=CHAT_LINK_PUBLIC)],
+                        [InlineKeyboardButton("📢 PGSM Stock News", url=NEWS_LINK_PUBLIC)],
+                    ]
+                ),
+            )
+            try:
+                await query.get_bot().send_message(
+                    chat_id=ADMIN_CHAT_ID,
+                    text=f"📋 New Waitlist Entry\n\nUser: {tg_tag}\nID: {user_id}",
+                )
+            except Exception:
+                pass
+        else:
             await query.answer(
                 "Could not process your request. Please try again.", show_alert=True
             )
