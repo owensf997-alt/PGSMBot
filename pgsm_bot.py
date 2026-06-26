@@ -2545,7 +2545,7 @@ def _start_notify_server():
         import asyncio as _asyncio
 
         async def _send():
-            await _notify_bot_app.bot.send_message(chat_id=int(chat_id), text=text)
+            await _notify_bot_app.bot.send_message(chat_id=int(chat_id), text=text, parse_mode="HTML")
 
         try:
             if _notify_loop and _notify_loop.is_running():
