@@ -2117,23 +2117,35 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         price_str = (
             f"${price:.0f}/month" if plan == "monthly" else f"${price:.0f} one-time"
         )
-        await query.message.reply_html(
-            f"📋 <b>{plan_name}</b>\n\nPrice: <b>{price_str}</b>\n\n"
-            "🔒 <b>Enrollment is currently closed.</b>\n\n"
-            "New memberships are temporarily suspended. "
-            "Join the waitlist to be notified the moment spots open up.",
-            reply_markup=InlineKeyboardMarkup(
-                [
+
+        # Üyelik alımı açık mı? — web API'sinden oku (DB'den, kalıcı)
+        _enrollment_open = True  # default: açık
+        try:
+            import requests as _req_enr
+            _enr_resp = _req_enr.get(
+                f"{WEB_BASE_URL}/api/admin/enrollment/status",
+                headers={"X-Bot-Secret": BOT_SECRET},
+                timeout=5,
+            )
+            if _enr_resp.ok:
+                _enrollment_open = _enr_resp.json().get("enrollment_open", True)
+        except Exception as _e:
+            logger.warning(f"enrollment status check failed: {_e}")
+
+        if not _enrollment_open:
+            await query.message.reply_html(
+                f"📋 <b>{plan_name}</b>\n\nPrice: <b>{price_str}</b>\n\n"
+                "🔒 <b>Enrollment is currently closed.</b>\n\n"
+                "New memberships are temporarily suspended. "
+                "Join the waitlist to be notified the moment spots open up.",
+                reply_markup=InlineKeyboardMarkup(
                     [
-                        InlineKeyboardButton(
-                            "📋 Join the Waitlist", callback_data="join_waitlist"
-                        )
-                    ],
-                    [InlineKeyboardButton("🔙 Back", callback_data="restricted_home")],
-                ]
-            ),
-        )
-        return
+                        [InlineKeyboardButton("📋 Join the Waitlist", callback_data="join_waitlist")],
+                        [InlineKeyboardButton("🔙 Back", callback_data="restricted_home")],
+                    ]
+                ),
+            )
+            return
 
     # ── Ödeme başlat ──
     if data.startswith("subpay_"):
