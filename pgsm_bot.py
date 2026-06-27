@@ -971,29 +971,80 @@ def main_menu_markup() -> InlineKeyboardMarkup:
     )
 
 
+async def _get_enrollment_open() -> bool:
+    """Web API'den enrollment durumunu oku. Hata olursa True (açık) döner."""
+    try:
+        import requests as _req_enr
+        _resp = _req_enr.get(
+            f"{WEB_BASE_URL}/api/admin/enrollment/status",
+            headers={"X-Bot-Secret": BOT_SECRET},
+            timeout=5,
+        )
+        if _resp.ok:
+            return bool(_resp.json().get("enrollment_open", True))
+    except Exception as _e:
+        logger.warning(f"enrollment status check failed: {_e}")
+    return True  # hata durumunda açık say
+
+
 async def send_restricted_message(target, user=None) -> None:
     name = user.first_name if user and getattr(user, "first_name", None) else "there"
-    text = (
-        f"👋 Welcome to PGSM, {name}!\n\n"
-        "<b>PGSM Marketplace — Prepaid & Gift Card Stocks</b>\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "🔒 <b>New memberships are temporarily suspended.</b>\n\n"
-        "We are currently limiting access to maintain the quality and "
-        "exclusivity of our marketplace. Enrollment will reopen soon.\n\n"
-        "📅 <b>Monthly Plan — $29/month</b>\n"
-        "   Renews every 30 days\n\n"
-        "♾️ <b>Lifetime Plan — $199 one-time</b>\n"
-        "   Pay once, access forever\n\n"
-        "✅ Instant delivery\n"
-        "✅ Fresh stock, never relisted\n"
-        "✅ Secure web dashboard\n"
-        "✅ LTC & USDC payments\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📋 <b>Want to be notified when registrations open?</b>\n"
-        "Join our waitlist and you'll receive a direct notification "
-        "the moment new spots become available — before anyone else."
-    )
-    await target.reply_html(text, reply_markup=subscription_markup())
+    enrollment_open = await _get_enrollment_open()
+
+    if enrollment_open:
+        # Üyelik AÇIK — normal kayıt ekranı
+        text = (
+            f"👋 Welcome to PGSM, {name}!\n\n"
+            "<b>PGSM Marketplace — Prepaid & Gift Card Stocks</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🔓 <b>Memberships are now open!</b>\n\n"
+            "Join PGSM and get instant access to our marketplace.\n\n"
+            "📅 <b>Monthly Plan — $29/month</b>\n"
+            "   Renews every 30 days\n\n"
+            "♾️ <b>Lifetime Plan — $199 one-time</b>\n"
+            "   Pay once, access forever\n\n"
+            "✅ Instant delivery\n"
+            "✅ Fresh stock, never relisted\n"
+            "✅ Secure web dashboard\n"
+            "✅ LTC & USDC payments\n"
+            "━━━━━━━━━━━━━━━━━━━━"
+        )
+        markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📅 Monthly Plan — $29/mo", callback_data="sub_monthly")],
+            [InlineKeyboardButton("♾️ Lifetime Plan — $199", callback_data="sub_lifetime")],
+            [InlineKeyboardButton("📢 PGSM Stock News", url=NEWS_LINK_PUBLIC)],
+            [InlineKeyboardButton("🎧 Support", callback_data="support_unregistered")],
+        ])
+    else:
+        # Üyelik KAPALI — waitlist ekranı
+        text = (
+            f"👋 Welcome to PGSM, {name}!\n\n"
+            "<b>PGSM Marketplace — Prepaid & Gift Card Stocks</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🔒 <b>New memberships are temporarily suspended.</b>\n\n"
+            "We are currently limiting access to maintain the quality and "
+            "exclusivity of our marketplace. Enrollment will reopen soon.\n\n"
+            "📅 <b>Monthly Plan — $29/month</b>\n"
+            "   Renews every 30 days\n\n"
+            "♾️ <b>Lifetime Plan — $199 one-time</b>\n"
+            "   Pay once, access forever\n\n"
+            "✅ Instant delivery\n"
+            "✅ Fresh stock, never relisted\n"
+            "✅ Secure web dashboard\n"
+            "✅ LTC & USDC payments\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "📋 <b>Want to be notified when registrations open?</b>\n"
+            "Join our waitlist and you'll receive a direct notification "
+            "the moment new spots become available — before anyone else."
+        )
+        markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📅 Monthly Plan — $29/mo", callback_data="sub_monthly")],
+            [InlineKeyboardButton("♾️ Lifetime Plan — $199", callback_data="sub_lifetime")],
+            [InlineKeyboardButton("📋 Join the Waitlist", callback_data="join_waitlist")],
+            [InlineKeyboardButton("📢 PGSM Stock News", url=NEWS_LINK_PUBLIC)],
+            [InlineKeyboardButton("🎧 Support", callback_data="support_unregistered")],
+        ])
+    await target.reply_html(text, reply_markup=markup)
 
 
 async def show_main_menu(target) -> None:
@@ -2118,19 +2169,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"${price:.0f}/month" if plan == "monthly" else f"${price:.0f} one-time"
         )
 
-        # Üyelik alımı açık mı? — web API'sinden oku (DB'den, kalıcı)
-        _enrollment_open = True  # default: açık
-        try:
-            import requests as _req_enr
-            _enr_resp = _req_enr.get(
-                f"{WEB_BASE_URL}/api/admin/enrollment/status",
-                headers={"X-Bot-Secret": BOT_SECRET},
-                timeout=5,
-            )
-            if _enr_resp.ok:
-                _enrollment_open = _enr_resp.json().get("enrollment_open", True)
-        except Exception as _e:
-            logger.warning(f"enrollment status check failed: {_e}")
+        # Üyelik alımı açık mı? — ortak helper
+        _enrollment_open = await _get_enrollment_open()
 
         if not _enrollment_open:
             await query.message.reply_html(
