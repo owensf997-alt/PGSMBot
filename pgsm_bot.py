@@ -2622,6 +2622,73 @@ def _start_notify_server():
     def _health():
         return _jsonify({"status": "ok", "service": "pgsm-bot-notify"})
 
+    @_flask_app.route("/internal/enrollment_broadcast", methods=["POST"])
+    def _enrollment_broadcast():
+        """Üyelik durumu değişince tüm kullanıcılara Telegram bildirimi gönder."""
+        data = _req.get_json(force=True, silent=True) or {}
+        if not _check_secret(data):
+            return _jsonify({"error": "unauthorized"}), 401
+
+        is_open = bool(data.get("enrollment_open", True))
+        target  = data.get("target", "all")  # "all" | "waitlist" | "approved"
+        # user_ids override (opsiyonel)
+        override_ids = data.get("user_ids", [])
+
+        if is_open:
+            msg = (
+                "🟢 <b>PGSM Membership is now OPEN!</b>\n\n"
+                "Great news — we're accepting new members again.\n\n"
+                "📅 <b>Monthly Plan</b> — $29/month\n"
+                "♾️ <b>Lifetime Plan</b> — $199 one-time\n\n"
+                "Spots are limited. Secure yours before they're gone 👇"
+            )
+        else:
+            msg = (
+                "🔒 <b>PGSM Membership is temporarily closed.</b>\n\n"
+                "We're pausing new sign-ups to maintain quality for our existing members.\n\n"
+                "📋 Join the waitlist and we'll notify you the moment spots open up — "
+                "you'll be first in line.\n\n"
+                "Thank you for your patience. 🙏"
+            )
+
+        if not _notify_loop or not _notify_loop.is_running():
+            return _jsonify({"error": "bot loop henüz hazır değil"}), 503
+
+        # Hedef kullanıcı listesini belirle
+        if override_ids:
+            targets = [str(uid) for uid in override_ids]
+        elif target == "waitlist":
+            # waitlist'teki user_id'leri data'dan al (web zaten gönderir)
+            targets = [str(uid) for uid in data.get("waitlist_ids", [])]
+        else:
+            # "all" → approved_users (aktif üyeler) + waitlist_ids
+            # access_data pgsm_bot.py global değişkeni — closure üzerinden erişilir
+            _approved = list(access_data.get("approved_users", []))
+            _waitlist_ids = data.get("waitlist_ids", [])
+            targets = list(set([str(u) for u in _approved] + [str(u) for u in _waitlist_ids]))
+
+        import asyncio as _asyncio
+
+        async def _bulk_send():
+            sent, failed = 0, 0
+            for uid in targets:
+                try:
+                    await _notify_bot_app.bot.send_message(
+                        chat_id=int(uid), text=msg, parse_mode="HTML"
+                    )
+                    sent += 1
+                    await _asyncio.sleep(0.05)
+                except Exception as _e:
+                    failed += 1
+            return sent, failed
+
+        try:
+            fut = _asyncio.run_coroutine_threadsafe(_bulk_send(), _notify_loop)
+            sent, failed = fut.result(timeout=60)
+            return _jsonify({"success": True, "sent": sent, "failed": failed})
+        except Exception as e:
+            return _jsonify({"error": str(e)}), 500
+
     def _check_secret(data) -> bool:
         _secret = NOTIFY_BOT_SECRET.strip()
         if not _secret:
