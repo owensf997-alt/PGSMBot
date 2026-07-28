@@ -919,16 +919,6 @@ def subscription_markup() -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton(
-                    "📅 Monthly Plan — $29/mo", callback_data="sub_monthly"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "♾️ Lifetime Plan — $199", callback_data="sub_lifetime"
-                )
-            ],
-            [
-                InlineKeyboardButton(
                     "📋 Join the Waitlist", callback_data="join_waitlist"
                 )
             ],
@@ -1039,8 +1029,6 @@ async def send_restricted_message(target, user=None) -> None:
             "Thank you for your continued support!"
         )
         markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📅 Monthly Plan — $29/mo", callback_data="sub_monthly")],
-            [InlineKeyboardButton("♾️ Lifetime Plan — $199", callback_data="sub_lifetime")],
             [InlineKeyboardButton("📢 PGSM Stock News", url=NEWS_LINK_PUBLIC)],
             [InlineKeyboardButton("🎧 Support", callback_data="support_unregistered")],
         ])
