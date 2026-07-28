@@ -1033,9 +1033,17 @@ async def send_restricted_message(target, user=None) -> None:
             "✅ Secure web dashboard\n"
             "✅ LTC & USDC payments\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "📋 <b>Want to be notified when registrations open?</b>\n"
-            "Join our waitlist and you'll receive a direct notification "
-            "the moment new spots become available — before anyone else."
+            "⚠️ <b>Important Update Regarding Memberships &amp; Stock</b>\n\n"
+            "Please note that new member enrollments are currently closed, "
+            "and we don't have plans to reopen them at this stage.\n\n"
+            "However, we've expanded our availability! You can now also find "
+            "our inventory listed on PGSM Marketplace.\n\n"
+            "If you're on the waitlist and looking to access our Prepaid Card stock, "
+            "you can easily do so via:\n\n"
+            "🔹 <b>Telegram:</b> @pgsmpaybot\n"
+            "🔹 <b>Web:</b> pgsmpay.cards\n\n"
+            "<i>Note: Our inventory is fully synced live with pgsmpay.cards.</i>\n\n"
+            "Thank you for your continued support!"
         )
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("📅 Monthly Plan — $29/mo", callback_data="sub_monthly")],
