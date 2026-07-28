@@ -1022,16 +1022,6 @@ async def send_restricted_message(target, user=None) -> None:
             "<b>PGSM Marketplace — Prepaid & Gift Card Stocks</b>\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "🔒 <b>New memberships are temporarily suspended.</b>\n\n"
-            "We are currently limiting access to maintain the quality and "
-            "exclusivity of our marketplace. Enrollment will reopen soon.\n\n"
-            "📅 <b>Monthly Plan — $29/month</b>\n"
-            "   Renews every 30 days\n\n"
-            "♾️ <b>Lifetime Plan — $199 one-time</b>\n"
-            "   Pay once, access forever\n\n"
-            "✅ Instant delivery\n"
-            "✅ Fresh stock, never relisted\n"
-            "✅ Secure web dashboard\n"
-            "✅ LTC & USDC payments\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "⚠️ <b>Important Update Regarding Memberships &amp; Stock</b>\n\n"
             "Please note that new member enrollments are currently closed, "
@@ -1048,7 +1038,6 @@ async def send_restricted_message(target, user=None) -> None:
         markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("📅 Monthly Plan — $29/mo", callback_data="sub_monthly")],
             [InlineKeyboardButton("♾️ Lifetime Plan — $199", callback_data="sub_lifetime")],
-            [InlineKeyboardButton("📋 Join the Waitlist", callback_data="join_waitlist")],
             [InlineKeyboardButton("📢 PGSM Stock News", url=NEWS_LINK_PUBLIC)],
             [InlineKeyboardButton("🎧 Support", callback_data="support_unregistered")],
         ])
